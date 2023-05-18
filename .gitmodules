@@ -1,3 +1,0 @@
-[submodule "components/bmi270"]
-	path = components/bmi270
-	url = https://github.com/BoschSensortec/BMI270-Sensor-API

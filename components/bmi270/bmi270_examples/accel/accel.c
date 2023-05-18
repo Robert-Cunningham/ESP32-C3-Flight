@@ -126,8 +126,6 @@ int main(void)
         }
     }
 
-    bmi2_coines_deinit();
-
     return rslt;
 }
 

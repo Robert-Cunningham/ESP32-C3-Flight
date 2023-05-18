@@ -1,6 +1,4 @@
 #include "driver/i2c.h"
-// #include "BMI270-Sensor-API/bmi270.h"
-// #include "BMI270-Sensor-API/bmi2.h"
 #include "rom/ets_sys.h"
 #include <stdio.h>
 #include <string.h>
@@ -20,34 +18,6 @@ int8_t i2c_read(uint8_t reg_addr, uint8_t *data, uint16_t len, void *intf_ptr) {
     // ESP_LOGE("BMI270", "res: %x", data[0]);
     return err == ESP_OK ? 0 : -1;
 }
-
-/*
-int8_t i2c_read(uint8_t reg_addr, uint8_t *data, uint16_t len, void *intf_ptr) {
-    if (len == 0) {
-        return ESP_OK;
-    }
-
-    ESP_LOGE("BMI270", "reading... %X, %X, %X", reg_addr, data[0], len);
-    i2c_port_t i2c_num = (i2c_port_t)intf_ptr;
-    
-    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
-    i2c_master_start(cmd);
-    i2c_master_write_byte(cmd, (DEV_ADDR << 1) | I2C_MASTER_WRITE, true);
-    i2c_master_write_byte(cmd, reg_addr, true);
-    i2c_master_start(cmd);
-    i2c_master_write_byte(cmd, (DEV_ADDR << 1) | I2C_MASTER_READ, true);
-    if (len > 1) {
-        i2c_master_read(cmd, data, len - 1, I2C_MASTER_ACK);
-    }
-    i2c_master_read_byte(cmd, data + len - 1, I2C_MASTER_NACK);
-    i2c_master_stop(cmd);
-    esp_err_t err = i2c_master_cmd_begin(i2c_num, cmd, pdMS_TO_TICKS(1000));
-    i2c_cmd_link_delete(cmd);
-
-    ESP_LOGE("BMI270", "res: %x", data[0]);
-    return err == ESP_OK ? 0 : -1;
-}
-*/
 
 
 int8_t i2c_write(uint8_t reg_addr, const uint8_t *data, uint16_t len, void *intf_ptr) {
@@ -79,9 +49,6 @@ esp_err_t bmi270_init_mine(i2c_port_t i2c_num, struct bmi2_dev *bmi270_sensor) {
         ESP_LOGE("BMI270", "bmi270_init failed: %d", result);
         return ESP_FAIL;
     }
-
-    // Configure the BMI270 sensor settings
-    // ...
 
     return ESP_OK;
 }
