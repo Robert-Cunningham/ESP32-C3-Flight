@@ -80,11 +80,11 @@ void wifi_init_softap(void)
     wifi_config_t wifi_config = {
         .ap = {
             .ssid = WIFI_SSID,
-            .ssid_len = strlen(WIFI_SSID),
+            .ssid_len = 0, // strlen(WIFI_SSID),
             .channel = WIFI_CHANNEL,
-            .password = WIFI_PASS,
+            .password = "", //WIFI_PASS,
             .max_connection = 10,
-            .authmode = WIFI_AUTH_WPA_WPA2_PSK,
+            .authmode = WIFI_AUTH_OPEN,
             .pmf_cfg = {
                     .required = false,
             },
@@ -94,6 +94,28 @@ void wifi_init_softap(void)
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
+}
+
+esp_err_t gpio_handler(httpd_req_t *req) {
+    // gpio_set_level(GPIO_NUM, 1);
+    httpd_resp_sendstr(req, "GPIO set high");
+    return ESP_OK;
+}
+
+void config_http() {
+    httpd_handle_t server = NULL;
+    httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+
+    httpd_start(&server, &config);
+
+    httpd_uri_t gpio_uri = {
+        .uri       = "/gpio",
+        .method    = HTTP_GET,
+        .handler   = gpio_handler,
+        .user_ctx  = NULL
+    };
+
+    httpd_register_uri_handler(server, &gpio_uri);
 }
 
 void app_main(void) {
@@ -109,6 +131,7 @@ void app_main(void) {
 
     xTaskCreate(bmi270_task, "bmi270_task", 4096, (void *)i2c_num, 5, NULL);
     wifi_init_softap();
+    config_http();
 }
 
 void gyro_accel_sample(struct bmi2_dev * bmi2_dev) {
@@ -187,7 +210,7 @@ void gyro_accel_sample(struct bmi2_dev * bmi2_dev) {
                 /* Print the data in dps. */
                 // printf("Gyro_DPS_X = %4.2f, Gyro_DPS_Y = %4.2f, Gyro_DPS_Z = %4.2f\n", x, y, z);
 
-                printf("%4.2f, %4.2f, %4.2f, %4.2f, %4.2f, %4.2f \n", xa, ya, za, xg, yg, zg);
+                // printf("%4.2f, %4.2f, %4.2f, %4.2f, %4.2f, %4.2f \n", xa, ya, za, xg, yg, zg);
 
                 indx++;
             }
