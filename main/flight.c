@@ -5,6 +5,11 @@
 #include "driver/i2c.h"
 #include "esp_system.h"
 #include "esp_log.h"
+#include "esp_wifi.h"
+#include "esp_event.h"
+#include "esp_netif.h"
+#include "esp_http_server.h"
+#include "nvs_flash.h"
 #include "accel_gyro.h"
 #include "common.h"
 #include "bmi270.h"
@@ -56,6 +61,41 @@ void bmi270_task(void *arg) {
     }
 }
 
+#define WIFI_SSID "Robert Drone"
+#define WIFI_CHANNEL 1
+#define WIFI_PASS "secretpass"
+
+void wifi_init_softap(void)
+{
+    ESP_ERROR_CHECK(nvs_flash_init());
+    ESP_ERROR_CHECK(esp_netif_init());
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
+    esp_netif_create_default_wifi_ap();
+
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+
+    // ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL, NULL));
+
+    wifi_config_t wifi_config = {
+        .ap = {
+            .ssid = WIFI_SSID,
+            .ssid_len = strlen(WIFI_SSID),
+            .channel = WIFI_CHANNEL,
+            .password = WIFI_PASS,
+            .max_connection = 10,
+            .authmode = WIFI_AUTH_WPA_WPA2_PSK,
+            .pmf_cfg = {
+                    .required = false,
+            },
+        },
+    };
+
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));
+    ESP_ERROR_CHECK(esp_wifi_start());
+}
+
 void app_main(void) {
     i2c_port_t i2c_num = 0;
     // gpio_num_t scl_pin = GPIO_NUM_6;
@@ -68,6 +108,7 @@ void app_main(void) {
     }
 
     xTaskCreate(bmi270_task, "bmi270_task", 4096, (void *)i2c_num, 5, NULL);
+    wifi_init_softap();
 }
 
 void gyro_accel_sample(struct bmi2_dev * bmi2_dev) {
