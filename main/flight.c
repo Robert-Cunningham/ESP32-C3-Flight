@@ -15,6 +15,103 @@
 #include "bmi270.h"
 #include "bmi270_interface.c"
 
+#include "driver/ledc.h"
+
+
+
+// M1 = GPIO 4
+// M2 = GPIO 5
+// M3 = GPIO 0
+// M4 = GPIO 21
+
+#define GPIO_LED_A_BLUE 1 // LED A
+#define GPIO_LED_B_RED 20 // LED B
+#define GPIO_LED_C_GREEN 10 // LED C
+
+#define GPIO_MOTOR_1 4
+#define GPIO_MOTOR_2 5
+#define GPIO_MOTOR_3 0
+#define GPIO_MOTOR_4 21
+
+int stored_throttle = 0;
+int stored_roll = 0;
+int stored_pitch = 0;
+int stored_yaw = 0;
+
+#define LEDC_HS_TIMER          LEDC_TIMER_0
+#define LEDC_HS_MODE           LEDC_LOW_SPEED_MODE
+#define LEDC_HS_CH0_CHANNEL    LEDC_CHANNEL_0
+
+#define DUTY_RESOLUTION    LEDC_TIMER_13_BIT // resolution of PWM duty
+#define LED_FULL_DUTY      (1<<DUTY_RESOLUTION) // maximum duty cycle
+
+
+void led_initialize(void) {
+    ledc_fade_func_install(0);
+}
+
+// Task to control motors based on stored throttle, roll, pitch, yaw
+void control_task(void* arg) {
+    led_initialize();
+
+    while(1) {
+        uint32_t motor_speed0 = stored_throttle + stored_roll + stored_pitch + stored_yaw;
+        uint32_t motor_speed1 = stored_throttle - stored_roll + stored_pitch - stored_yaw;
+        uint32_t motor_speed2 = stored_throttle + stored_roll - stored_pitch - stored_yaw;
+        uint32_t motor_speed3 = stored_throttle - stored_roll - stored_pitch + stored_yaw;
+
+        ledc_timer_config_t ledc_timer = {
+            .speed_mode = LEDC_LOW_SPEED_MODE,       // timer mode
+            .duty_resolution = DUTY_RESOLUTION,      // resolution of PWM duty
+            .timer_num = LEDC_HS_TIMER,              // timer index
+            .freq_hz = 5000,                         // frequency of PWM signal
+            .clk_cfg = LEDC_AUTO_CLK,                // Auto select the source clock
+        };
+
+        ledc_timer_config(&ledc_timer);
+
+        ledc_channel_config_t ledc_channel_0 = {
+            .channel    = LEDC_CHANNEL_0,
+            .duty       = LED_FULL_DUTY / 256 * (256 - motor_speed0),
+            .gpio_num   = GPIO_LED_A_BLUE,
+            .speed_mode = LEDC_LOW_SPEED_MODE,
+            .hpoint     = 0,
+            .timer_sel  = LEDC_HS_TIMER
+        };
+        ledc_channel_config_t ledc_channel_1 = {
+            .channel    = LEDC_CHANNEL_1,
+            .duty       = LED_FULL_DUTY / 256 * (256 - motor_speed1),
+            .gpio_num   = GPIO_LED_B_RED,
+            .speed_mode = LEDC_LOW_SPEED_MODE,
+            .hpoint     = 0,
+            .timer_sel  = LEDC_HS_TIMER
+        };
+        ledc_channel_config_t ledc_channel_2 = {
+            .channel    = LEDC_CHANNEL_2,
+            .duty       = LED_FULL_DUTY / 256 * (256 - motor_speed2),
+            .gpio_num   = GPIO_LED_C_GREEN,
+            .speed_mode = LEDC_LOW_SPEED_MODE,
+            .hpoint     = 0,
+            .timer_sel  = LEDC_HS_TIMER
+        };
+        // ledc_channel_config_t ledc_channel_3 = {
+        //     .channel    = LEDC_CHANNEL_0,
+        //     .duty       = LED_FULL_DUTY / 256 * motor_speed3,
+        //     .gpio_num   = GPIO_LED_A_BLUE,
+        //     .speed_mode = LEDC_LOW_SPEED_MODE,
+        //     .hpoint     = 0,
+        //     .timer_sel  = LEDC_HS_TIMER
+        // };
+
+        ledc_channel_config(&ledc_channel_0);
+        ledc_channel_config(&ledc_channel_1);
+        ledc_channel_config(&ledc_channel_2);
+        // ledc_channel_config(&ledc_channel_3);
+
+        vTaskDelay(10 / portTICK_PERIOD_MS);
+    }
+}
+
 void gyro_accel_sample(struct bmi2_dev * bmi2_dev);
 
 static esp_err_t i2c_master_init(void)
@@ -102,6 +199,36 @@ esp_err_t gpio_handler(httpd_req_t *req) {
     return ESP_OK;
 }
 
+esp_err_t command_post_handler(httpd_req_t *req) {
+    size_t buf_len;
+    char buf[200];
+
+    buf_len = httpd_req_get_url_query_len(req) + 1;
+    if (httpd_req_get_url_query_str(req, buf, buf_len) == ESP_OK) {
+        char param[32];
+
+        if (httpd_query_key_value(buf, "throttle", param, sizeof(param)) == ESP_OK) {
+            stored_throttle = atoi(param);
+        }
+        if (httpd_query_key_value(buf, "roll", param, sizeof(param)) == ESP_OK) {
+            stored_roll = atoi(param);
+        }
+        if (httpd_query_key_value(buf, "pitch", param, sizeof(param)) == ESP_OK) {
+            stored_pitch = atoi(param);
+        }
+        if (httpd_query_key_value(buf, "yaw", param, sizeof(param)) == ESP_OK) {
+            stored_yaw = atoi(param);
+        }
+
+        httpd_resp_sendstr(req, "Command received");
+        return ESP_OK;
+    }
+
+    httpd_resp_send_500(req);
+    return ESP_FAIL;
+}
+
+
 void config_http() {
     httpd_handle_t server = NULL;
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
@@ -109,9 +236,9 @@ void config_http() {
     httpd_start(&server, &config);
 
     httpd_uri_t gpio_uri = {
-        .uri       = "/gpio",
-        .method    = HTTP_GET,
-        .handler   = gpio_handler,
+        .uri       = "/command",
+        .method    = HTTP_POST,
+        .handler   = command_post_handler,
         .user_ctx  = NULL
     };
 
@@ -129,7 +256,8 @@ void app_main(void) {
         return;
     }
 
-    xTaskCreate(bmi270_task, "bmi270_task", 4096, (void *)i2c_num, 5, NULL);
+    xTaskCreate(bmi270_task, "Gyro Task", 4096, (void *)i2c_num, 5, NULL);
+    xTaskCreate(control_task, "Control Task", 2048, NULL, 5, NULL);
     wifi_init_softap();
     config_http();
 }
