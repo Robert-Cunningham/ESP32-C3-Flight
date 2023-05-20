@@ -14,7 +14,8 @@
 #include "common.h"
 #include "bmi270.h"
 #include "bmi270_interface.c"
-#include "esp_system.h"
+#include "esp_timer.h"
+#include <math.h>
 
 #include "driver/ledc.h"
 
@@ -24,6 +25,9 @@
 // M2 = GPIO 5
 // M3 = GPIO 0
 // M4 = GPIO 21
+
+
+// gyroscope is x = pitch, y = roll, z = yaw.
 
 #define GPIO_LED_A_BLUE 1 // LED A
 #define GPIO_LED_B_RED 20 // LED B
@@ -206,12 +210,6 @@ void wifi_init_softap(void)
     ESP_ERROR_CHECK(esp_wifi_start());
 }
 
-esp_err_t gpio_handler(httpd_req_t *req) {
-    // gpio_set_level(GPIO_NUM, 1);
-    httpd_resp_sendstr(req, "GPIO set high");
-    return ESP_OK;
-}
-
 esp_err_t command_post_handler(httpd_req_t *req) {
     size_t buf_len;
     char buf[200];
@@ -276,15 +274,24 @@ void app_main(void) {
     config_http();
 }
 
-static float xr = 0f, yr = 0f, zr = 0f;
+static float xr = 0, yr = 0, zr = 0;
+
+static float xe = 0, ye = 0, ze = 0;
+
+float alpha = 0.5;
+
+static float rad2deg = 360 / (2 * M_PI);
 
 void gyro_accel_sample(struct bmi2_dev * bmi2_dev) {
     int8_t rslt;
     struct bmi2_sens_data sensor_data = { { 0 } };
     uint16_t int_status = 0;
+    uint64_t prev_time_us = esp_timer_get_time();
 
     float xg = 0, yg = 0, zg = 0;
     float xa = 0, ya = 0, za = 0;
+
+    bool first = false;
 
     rslt = set_accel_gyro_config(bmi2_dev);
 
@@ -312,6 +319,35 @@ void gyro_accel_sample(struct bmi2_dev * bmi2_dev) {
             xg = lsb_to_dps(sensor_data.gyr.x, 2000, bmi2_dev->resolution);
             yg = lsb_to_dps(sensor_data.gyr.y, 2000, bmi2_dev->resolution);
             zg = lsb_to_dps(sensor_data.gyr.z, 2000, bmi2_dev->resolution);
+
+            // Integrate
+            uint64_t current_time_us = esp_timer_get_time();
+            float dt = (current_time_us - prev_time_us) / 1000000.0f; // convert us to s
+
+            // xr += xg * dt;
+            // yr += yg * dt;
+            // zr += zg * dt;
+
+            prev_time_us = current_time_us;
+
+            // printf("%4.2f, %4.2f, %4.2f, %4.2f, %4.2f, %4.2f \n", xr, yr, zr, xg, yg, zg);
+
+            float pitch = atan2(ya, sqrt(xa * xa + za * za)) * rad2deg;
+            float roll = atan2(-xa, za) * rad2deg;
+
+            // Complementary filter:
+            // angle = alpha * (angle + gyro * dt) + (1 - alpha) * accel
+
+            // if (first) {
+            //     first = false;
+            //     
+            // }
+
+            xe = alpha * (xe + xg * dt) + (1 - alpha) * pitch;
+            ye = alpha * (ye + yg * dt) + (1 - alpha) * roll;
+
+
+            // printf("%4.2f \t %4.2f \t %4.2f \t %4.2f \t %4.2f \t %4.2f \t %4.2f \n", xr, yr, zr, pitch, roll, xe, ye);
         }
     }
 }
