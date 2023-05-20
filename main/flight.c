@@ -38,10 +38,15 @@
 #define GPIO_MOTOR_3 0
 #define GPIO_MOTOR_4 21
 
-int stored_throttle = 0;
-int stored_roll = 0;
-int stored_pitch = 0;
-int stored_yaw = 0;
+int control_throttle = 0;
+int control_roll = 0;
+int control_pitch = 0;
+int control_yaw = 0;
+
+int applied_throttle = 0;
+int applied_roll = 0;
+int applied_pitch = 0;
+int applied_yaw = 0;
 
 #define LEDC_HS_TIMER          LEDC_TIMER_0
 #define LEDC_HS_MODE           LEDC_LOW_SPEED_MODE
@@ -65,15 +70,41 @@ void gpio_normalize(void) {
     gpio_config(&io_conf);
 }
 
+// e.g. 8 means that the max speed is 1/8 full.
+#define SPEED_DIV 4 
+
+uint32_t smooth_motor_speed(uint32_t target, uint32_t current) {
+    if (target > 255) {
+        target = 255;
+    } 
+
+    if (target > current) {
+        return current + 1;
+    } else if (target < current) {
+        return current - 1;
+    }
+    return current;
+}
+
+int32_t motor_0_speed = 0;
+int32_t motor_1_speed = 0;
+int32_t motor_2_speed = 0;
+int32_t motor_3_speed = 0;
+
 // Task to control motors based on stored throttle, roll, pitch, yaw
 void control_task(void* arg) {
     led_initialize();
 
     while(1) {
-        int32_t motor_speed0 = stored_throttle - stored_roll - stored_pitch + stored_yaw;
-        int32_t motor_speed1 = stored_throttle + stored_roll - stored_pitch - stored_yaw;
-        int32_t motor_speed2 = stored_throttle - stored_roll + stored_pitch - stored_yaw;
-        int32_t motor_speed3 = stored_throttle + stored_roll + stored_pitch + stored_yaw;
+        int32_t motor_0_target = applied_throttle - applied_roll - applied_pitch + applied_yaw;
+        int32_t motor_1_target = applied_throttle + applied_roll - applied_pitch - applied_yaw;
+        int32_t motor_2_target = applied_throttle - applied_roll + applied_pitch - applied_yaw;
+        int32_t motor_3_target = applied_throttle + applied_roll + applied_pitch + applied_yaw;
+
+        motor_0_speed = smooth_motor_speed(motor_0_target, motor_0_speed);
+        motor_1_speed = smooth_motor_speed(motor_1_target, motor_1_speed);
+        motor_2_speed = smooth_motor_speed(motor_2_target, motor_2_speed);
+        motor_3_speed = smooth_motor_speed(motor_3_target, motor_3_speed);
 
         // printf("m1 m2 m3 m4 %li %li %li %li \n", motor_speed0, motor_speed1, motor_speed2, motor_speed3);
 
@@ -89,7 +120,7 @@ void control_task(void* arg) {
 
         ledc_channel_config_t ledc_channel_0 = {
             .channel    = LEDC_CHANNEL_0,
-            .duty       = LED_FULL_DUTY / 256 * (motor_speed0),
+            .duty       = LED_FULL_DUTY / 256 * (motor_0_speed) / SPEED_DIV,
             .gpio_num   = GPIO_MOTOR_1,
             .speed_mode = LEDC_LOW_SPEED_MODE,
             .hpoint     = 0,
@@ -97,7 +128,7 @@ void control_task(void* arg) {
         };
         ledc_channel_config_t ledc_channel_1 = {
             .channel    = LEDC_CHANNEL_1,
-            .duty       = LED_FULL_DUTY / 256 * (motor_speed1),
+            .duty       = LED_FULL_DUTY / 256 * (motor_1_speed) / SPEED_DIV,
             .gpio_num   = GPIO_MOTOR_2,
             .speed_mode = LEDC_LOW_SPEED_MODE,
             .hpoint     = 0,
@@ -105,7 +136,7 @@ void control_task(void* arg) {
         };
         ledc_channel_config_t ledc_channel_2 = {
             .channel    = LEDC_CHANNEL_2,
-            .duty       = LED_FULL_DUTY / 256 * (motor_speed2),
+            .duty       = LED_FULL_DUTY / 256 * (motor_2_speed) / SPEED_DIV,
             .gpio_num   = GPIO_MOTOR_3,
             .speed_mode = LEDC_LOW_SPEED_MODE,
             .hpoint     = 0,
@@ -113,7 +144,7 @@ void control_task(void* arg) {
         };
         ledc_channel_config_t ledc_channel_3 = {
             .channel    = LEDC_CHANNEL_3,
-            .duty       = LED_FULL_DUTY / 256 * (motor_speed3),
+            .duty       = LED_FULL_DUTY / 256 * (motor_3_speed) / SPEED_DIV,
             .gpio_num   = GPIO_MOTOR_4,
             .speed_mode = LEDC_LOW_SPEED_MODE,
             .hpoint     = 0,
@@ -159,6 +190,7 @@ void bmi270_task(void *arg) {
     struct bmi2_sens_axes_data acc_data;
     struct bmi2_sens_axes_data gyro_data;
 
+    printf("starting bmi270 task...");
     i2c_port_t i2c_num = (i2c_port_t)arg;
 
     esp_err_t e = NULL;
@@ -170,9 +202,7 @@ void bmi270_task(void *arg) {
         return;
     }
 
-    while (1) {
-        gyro_accel_sample(&bmi270_sensor);
-    }
+    gyro_accel_sample(&bmi270_sensor);
 }
 
 #define WIFI_SSID "Robert Drone"
@@ -219,16 +249,16 @@ esp_err_t command_post_handler(httpd_req_t *req) {
         char param[32];
 
         if (httpd_query_key_value(buf, "throttle", param, sizeof(param)) == ESP_OK) {
-            stored_throttle = atoi(param);
+            control_throttle = atoi(param);
         }
         if (httpd_query_key_value(buf, "roll", param, sizeof(param)) == ESP_OK) {
-            stored_roll = atoi(param);
+            control_roll = atoi(param);
         }
         if (httpd_query_key_value(buf, "pitch", param, sizeof(param)) == ESP_OK) {
-            stored_pitch = atoi(param);
+            control_pitch = atoi(param);
         }
         if (httpd_query_key_value(buf, "yaw", param, sizeof(param)) == ESP_OK) {
-            stored_yaw = atoi(param);
+            control_yaw = atoi(param);
         }
 
         httpd_resp_sendstr(req, "Command received");
@@ -274,13 +304,39 @@ void app_main(void) {
     config_http();
 }
 
-static float xr = 0, yr = 0, zr = 0;
+typedef struct {
+    float p;
+    float i;
+    float d;
+    float last_error;
+    float integral;
+} pid_controller;
 
-static float xe = 0, ye = 0, ze = 0;
+pid_controller pid_x = {0.5, 0.0, 0.0, 0, 0};
+pid_controller pid_y = {0.5, 0.0, 0.0, 0, 0};
+
+static float x_estimate = 0, y_estimate = 0, z_estimate = 0;
+
+// static float x_target = 0, y_target = 0, z_target = 0;
 
 float alpha = 0.5;
 
-static float rad2deg = 360 / (2 * M_PI);
+static float rad2deg = 360.0 / (2 * M_PI);
+static float byte_to_deg = 360.0 / 256.0;
+static float deg_to_byte = 256.0 / 360.0;
+
+float pid_update(pid_controller* pid, float estimate, float target, float dt) {
+    float error = target - estimate;
+
+    pid->integral += error * dt;
+
+    float derivative = (error - pid->last_error) / dt;
+    pid->last_error = error;
+
+    float output = pid->p * error + pid->i * pid->integral + pid->d * derivative;
+
+    return output;
+}
 
 void gyro_accel_sample(struct bmi2_dev * bmi2_dev) {
     int8_t rslt;
@@ -303,6 +359,7 @@ void gyro_accel_sample(struct bmi2_dev * bmi2_dev) {
     rslt = bmi270_sensor_enable(sensor_list, 2, bmi2_dev);
 
     while (1) {
+        printf("waiting");
         /* To get the data ready interrupt status of accel and gyro. */
         rslt = bmi2_get_int_status(&int_status, bmi2_dev);
 
@@ -324,13 +381,7 @@ void gyro_accel_sample(struct bmi2_dev * bmi2_dev) {
             uint64_t current_time_us = esp_timer_get_time();
             float dt = (current_time_us - prev_time_us) / 1000000.0f; // convert us to s
 
-            // xr += xg * dt;
-            // yr += yg * dt;
-            // zr += zg * dt;
-
             prev_time_us = current_time_us;
-
-            // printf("%4.2f, %4.2f, %4.2f, %4.2f, %4.2f, %4.2f \n", xr, yr, zr, xg, yg, zg);
 
             float pitch = atan2(ya, sqrt(xa * xa + za * za)) * rad2deg;
             float roll = atan2(-xa, za) * rad2deg;
@@ -338,14 +389,22 @@ void gyro_accel_sample(struct bmi2_dev * bmi2_dev) {
             // Complementary filter:
             // angle = alpha * (angle + gyro * dt) + (1 - alpha) * accel
 
-            // if (first) {
-            //     first = false;
-            //     
-            // }
+            x_estimate = alpha * (x_estimate + xg * dt) + (1 - alpha) * pitch;
+            y_estimate = alpha * (y_estimate + yg * dt) + (1 - alpha) * roll;
 
-            xe = alpha * (xe + xg * dt) + (1 - alpha) * pitch;
-            ye = alpha * (ye + yg * dt) + (1 - alpha) * roll;
+            // PID controller
+            float x_target = control_pitch * byte_to_deg;
+            float y_target = control_roll * byte_to_deg;
 
+            float x_output = pid_update(&pid_x, x_estimate, x_target, dt);
+            float y_output = pid_update(&pid_y, y_estimate, y_target, dt);
+
+            applied_pitch = (int) (x_output * deg_to_byte);
+            applied_roll = (int) (y_output * deg_to_byte);
+            applied_throttle = control_throttle;
+            applied_yaw = control_yaw;
+
+            printf("xest %4.2f \t yest %4.2f; \t xtar %4.2f \t ytar %4.2f; xout %4.2f yout %4.2f; xapp %d, yapp %d; \n", x_estimate, y_estimate, x_target, y_target, x_output, y_output, applied_pitch, applied_roll);
 
             // printf("%4.2f \t %4.2f \t %4.2f \t %4.2f \t %4.2f \t %4.2f \t %4.2f \n", xr, yr, zr, pitch, roll, xe, ye);
         }
