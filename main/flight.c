@@ -14,6 +14,7 @@
 #include "common.h"
 #include "bmi270.h"
 #include "bmi270_interface.c"
+#include "esp_system.h"
 
 #include "driver/ledc.h"
 
@@ -50,15 +51,27 @@ void led_initialize(void) {
     ledc_fade_func_install(0);
 }
 
+void gpio_normalize(void) {
+    gpio_config_t io_conf;
+    io_conf.intr_type = GPIO_INTR_DISABLE;
+    io_conf.mode = GPIO_MODE_OUTPUT;
+    io_conf.pull_down_en = 0;
+    io_conf.pull_up_en = 0;
+    io_conf.pin_bit_mask = (1ULL<<GPIO_MOTOR_4);
+    gpio_config(&io_conf);
+}
+
 // Task to control motors based on stored throttle, roll, pitch, yaw
 void control_task(void* arg) {
     led_initialize();
 
     while(1) {
-        uint32_t motor_speed0 = stored_throttle + stored_roll + stored_pitch + stored_yaw;
-        uint32_t motor_speed1 = stored_throttle - stored_roll + stored_pitch - stored_yaw;
-        uint32_t motor_speed2 = stored_throttle + stored_roll - stored_pitch - stored_yaw;
-        uint32_t motor_speed3 = stored_throttle - stored_roll - stored_pitch + stored_yaw;
+        int32_t motor_speed0 = stored_throttle - stored_roll - stored_pitch + stored_yaw;
+        int32_t motor_speed1 = stored_throttle + stored_roll - stored_pitch - stored_yaw;
+        int32_t motor_speed2 = stored_throttle - stored_roll + stored_pitch - stored_yaw;
+        int32_t motor_speed3 = stored_throttle + stored_roll + stored_pitch + stored_yaw;
+
+        // printf("m1 m2 m3 m4 %li %li %li %li \n", motor_speed0, motor_speed1, motor_speed2, motor_speed3);
 
         ledc_timer_config_t ledc_timer = {
             .speed_mode = LEDC_LOW_SPEED_MODE,       // timer mode
@@ -72,41 +85,41 @@ void control_task(void* arg) {
 
         ledc_channel_config_t ledc_channel_0 = {
             .channel    = LEDC_CHANNEL_0,
-            .duty       = LED_FULL_DUTY / 256 * (256 - motor_speed0),
-            .gpio_num   = GPIO_LED_A_BLUE,
+            .duty       = LED_FULL_DUTY / 256 * (motor_speed0),
+            .gpio_num   = GPIO_MOTOR_1,
             .speed_mode = LEDC_LOW_SPEED_MODE,
             .hpoint     = 0,
             .timer_sel  = LEDC_HS_TIMER
         };
         ledc_channel_config_t ledc_channel_1 = {
             .channel    = LEDC_CHANNEL_1,
-            .duty       = LED_FULL_DUTY / 256 * (256 - motor_speed1),
-            .gpio_num   = GPIO_LED_B_RED,
+            .duty       = LED_FULL_DUTY / 256 * (motor_speed1),
+            .gpio_num   = GPIO_MOTOR_2,
             .speed_mode = LEDC_LOW_SPEED_MODE,
             .hpoint     = 0,
             .timer_sel  = LEDC_HS_TIMER
         };
         ledc_channel_config_t ledc_channel_2 = {
             .channel    = LEDC_CHANNEL_2,
-            .duty       = LED_FULL_DUTY / 256 * (256 - motor_speed2),
-            .gpio_num   = GPIO_LED_C_GREEN,
+            .duty       = LED_FULL_DUTY / 256 * (motor_speed2),
+            .gpio_num   = GPIO_MOTOR_3,
             .speed_mode = LEDC_LOW_SPEED_MODE,
             .hpoint     = 0,
             .timer_sel  = LEDC_HS_TIMER
         };
-        // ledc_channel_config_t ledc_channel_3 = {
-        //     .channel    = LEDC_CHANNEL_0,
-        //     .duty       = LED_FULL_DUTY / 256 * motor_speed3,
-        //     .gpio_num   = GPIO_LED_A_BLUE,
-        //     .speed_mode = LEDC_LOW_SPEED_MODE,
-        //     .hpoint     = 0,
-        //     .timer_sel  = LEDC_HS_TIMER
-        // };
+        ledc_channel_config_t ledc_channel_3 = {
+            .channel    = LEDC_CHANNEL_3,
+            .duty       = LED_FULL_DUTY / 256 * (motor_speed3),
+            .gpio_num   = GPIO_MOTOR_4,
+            .speed_mode = LEDC_LOW_SPEED_MODE,
+            .hpoint     = 0,
+            .timer_sel  = LEDC_HS_TIMER
+        };
 
         ledc_channel_config(&ledc_channel_0);
         ledc_channel_config(&ledc_channel_1);
         ledc_channel_config(&ledc_channel_2);
-        // ledc_channel_config(&ledc_channel_3);
+        ledc_channel_config(&ledc_channel_3);
 
         vTaskDelay(10 / portTICK_PERIOD_MS);
     }
@@ -256,11 +269,14 @@ void app_main(void) {
         return;
     }
 
+    gpio_normalize();
     xTaskCreate(bmi270_task, "Gyro Task", 4096, (void *)i2c_num, 5, NULL);
     xTaskCreate(control_task, "Control Task", 2048, NULL, 5, NULL);
     wifi_init_softap();
     config_http();
 }
+
+static float xr = 0f, yr = 0f, zr = 0f;
 
 void gyro_accel_sample(struct bmi2_dev * bmi2_dev) {
     /* Accel and gyro configuration settings. */
@@ -310,25 +326,10 @@ void gyro_accel_sample(struct bmi2_dev * bmi2_dev) {
                 rslt = bmi2_get_sensor_data(&sensor_data, bmi2_dev);
                 // bmi2_error_codes_print_result(rslt);
 
-                // printf("\n*******  Accel(Raw and m/s2) Gyro(Raw and dps) data : %d  *******\n", indx);
-
-                
-
-                // printf("\nAcc_x = %d\t", sensor_data.acc.x);
-                // printf("Acc_y = %d\t", sensor_data.acc.y);
-                // printf("Acc_z = %d", sensor_data.acc.z);
-
                 /* Converting lsb to meter per second squared for 16 bit accelerometer at 2G range. */
                 xa = lsb_to_mps2(sensor_data.acc.x, 2, bmi2_dev->resolution);
                 ya = lsb_to_mps2(sensor_data.acc.y, 2, bmi2_dev->resolution);
                 za = lsb_to_mps2(sensor_data.acc.z, 2, bmi2_dev->resolution);
-
-                /* Print the data in m/s2. */
-                // printf("\nAcc_ms2_X = %4.2f, Acc_ms2_Y = %4.2f, Acc_ms2_Z = %4.2f\n", x, y, z);
-
-                // printf("\nGyr_X = %d\t", sensor_data.gyr.x);
-                // printf("Gyr_Y = %d\t", sensor_data.gyr.y);
-                // printf("Gyr_Z= %d\n", sensor_data.gyr.z);
 
                 /* Converting lsb to degree per second for 16 bit gyro at 2000dps range. */
                 xg = lsb_to_dps(sensor_data.gyr.x, 2000, bmi2_dev->resolution);
