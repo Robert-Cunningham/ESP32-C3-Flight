@@ -279,70 +279,39 @@ void app_main(void) {
 static float xr = 0f, yr = 0f, zr = 0f;
 
 void gyro_accel_sample(struct bmi2_dev * bmi2_dev) {
-    /* Accel and gyro configuration settings. */
-    /* Status of api are returned to this variable. */
     int8_t rslt;
-
-    /* Variable to define limit to print accel data. */
-    uint8_t limit = 10;
-
-    /* Assign accel and gyro sensor to variable. */
-    uint8_t sensor_list[2] = { BMI2_ACCEL, BMI2_GYRO };
-
-    /* Create an instance of sensor data structure. */
     struct bmi2_sens_data sensor_data = { { 0 } };
-
-    /* Initialize the interrupt status of accel and gyro. */
     uint16_t int_status = 0;
-
-    uint8_t indx = 1;
 
     float xg = 0, yg = 0, zg = 0;
     float xa = 0, ya = 0, za = 0;
 
     rslt = set_accel_gyro_config(bmi2_dev);
 
-    // bmi2_error_codes_print_result(rslt);
+    if (rslt != BMI2_OK) {
+        // error
+    }
 
-    if (rslt == BMI2_OK)
-    {
-        /* NOTE:
-            * Accel and Gyro enable must be done after setting configurations
-            */
-        rslt = bmi270_sensor_enable(sensor_list, 2, bmi2_dev);
-        // bmi2_error_codes_print_result(rslt);
+    uint8_t sensor_list[2] = { BMI2_ACCEL, BMI2_GYRO };
+    rslt = bmi270_sensor_enable(sensor_list, 2, bmi2_dev);
 
-        /* Loop to print accel and gyro data when interrupt occurs. */
-        while (indx <= limit)
-        {
-            /* To get the data ready interrupt status of accel and gyro. */
-            rslt = bmi2_get_int_status(&int_status, bmi2_dev);
-            // bmi2_error_codes_print_result(rslt);
+    while (1) {
+        /* To get the data ready interrupt status of accel and gyro. */
+        rslt = bmi2_get_int_status(&int_status, bmi2_dev);
 
-            /* To check the data ready interrupt status and print the status for 10 samples. */
-            if ((int_status & BMI2_ACC_DRDY_INT_MASK) && (int_status & BMI2_GYR_DRDY_INT_MASK))
-            {
-                /* Get accel and gyro data for x, y and z axis. */
-                rslt = bmi2_get_sensor_data(&sensor_data, bmi2_dev);
-                // bmi2_error_codes_print_result(rslt);
+        /* To check the data ready interrupt status and print the status for 10 samples. */
+        if ((int_status & BMI2_ACC_DRDY_INT_MASK) && (int_status & BMI2_GYR_DRDY_INT_MASK)) {
+            rslt = bmi2_get_sensor_data(&sensor_data, bmi2_dev);
 
-                /* Converting lsb to meter per second squared for 16 bit accelerometer at 2G range. */
-                xa = lsb_to_mps2(sensor_data.acc.x, 2, bmi2_dev->resolution);
-                ya = lsb_to_mps2(sensor_data.acc.y, 2, bmi2_dev->resolution);
-                za = lsb_to_mps2(sensor_data.acc.z, 2, bmi2_dev->resolution);
+            /* Converting lsb to meter per second squared for 16 bit accelerometer at 2G range. */
+            xa = lsb_to_mps2(sensor_data.acc.x, 2, bmi2_dev->resolution);
+            ya = lsb_to_mps2(sensor_data.acc.y, 2, bmi2_dev->resolution);
+            za = lsb_to_mps2(sensor_data.acc.z, 2, bmi2_dev->resolution);
 
-                /* Converting lsb to degree per second for 16 bit gyro at 2000dps range. */
-                xg = lsb_to_dps(sensor_data.gyr.x, 2000, bmi2_dev->resolution);
-                yg = lsb_to_dps(sensor_data.gyr.y, 2000, bmi2_dev->resolution);
-                zg = lsb_to_dps(sensor_data.gyr.z, 2000, bmi2_dev->resolution);
-
-                /* Print the data in dps. */
-                // printf("Gyro_DPS_X = %4.2f, Gyro_DPS_Y = %4.2f, Gyro_DPS_Z = %4.2f\n", x, y, z);
-
-                // printf("%4.2f, %4.2f, %4.2f, %4.2f, %4.2f, %4.2f \n", xa, ya, za, xg, yg, zg);
-
-                indx++;
-            }
+            /* Converting lsb to degree per second for 16 bit gyro at 2000dps range. */
+            xg = lsb_to_dps(sensor_data.gyr.x, 2000, bmi2_dev->resolution);
+            yg = lsb_to_dps(sensor_data.gyr.y, 2000, bmi2_dev->resolution);
+            zg = lsb_to_dps(sensor_data.gyr.z, 2000, bmi2_dev->resolution);
         }
     }
 }
