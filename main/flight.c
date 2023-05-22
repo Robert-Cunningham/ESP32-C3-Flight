@@ -71,93 +71,95 @@ void gpio_normalize(void) {
 }
 
 // e.g. 8 means that the max speed is 1/8 full.
-#define SPEED_DIV 4 
+#define SPEED_DIV 1 
 
-uint32_t smooth_motor_speed(uint32_t target, uint32_t current) {
+#define SPEED_UPDATE 4
+
+int32_t smooth_motor_speed(int32_t target, int32_t current) {
+    return target;
+
     if (target > 255) {
         target = 255;
-    } 
+    } else if (target < 0) {
+        target = 0;
+    }
 
     if (target > current) {
-        return current + 1;
+        return current + SPEED_UPDATE;
     } else if (target < current) {
-        return current - 1;
+        return current - SPEED_UPDATE;
     }
     return current;
 }
 
-int32_t motor_0_speed = 0;
-int32_t motor_1_speed = 0;
-int32_t motor_2_speed = 0;
-int32_t motor_3_speed = 0;
+uint32_t motor_0_speed = 0;
+uint32_t motor_1_speed = 0;
+uint32_t motor_2_speed = 0;
+uint32_t motor_3_speed = 0;
 
 // Task to control motors based on stored throttle, roll, pitch, yaw
 void control_task(void* arg) {
-    led_initialize();
+    int32_t motor_0_target = applied_throttle + applied_roll - applied_pitch + applied_yaw;
+    int32_t motor_1_target = applied_throttle - applied_roll - applied_pitch - applied_yaw;
+    int32_t motor_2_target = applied_throttle + applied_roll + applied_pitch - applied_yaw;
+    int32_t motor_3_target = applied_throttle - applied_roll + applied_pitch + applied_yaw;
 
-    while(1) {
-        int32_t motor_0_target = applied_throttle - applied_roll - applied_pitch + applied_yaw;
-        int32_t motor_1_target = applied_throttle + applied_roll - applied_pitch - applied_yaw;
-        int32_t motor_2_target = applied_throttle - applied_roll + applied_pitch - applied_yaw;
-        int32_t motor_3_target = applied_throttle + applied_roll + applied_pitch + applied_yaw;
+    motor_0_speed = smooth_motor_speed(motor_0_target, motor_0_speed);
+    motor_1_speed = smooth_motor_speed(motor_1_target, motor_1_speed);
+    motor_2_speed = smooth_motor_speed(motor_2_target, motor_2_speed);
+    motor_3_speed = smooth_motor_speed(motor_3_target, motor_3_speed);
 
-        motor_0_speed = smooth_motor_speed(motor_0_target, motor_0_speed);
-        motor_1_speed = smooth_motor_speed(motor_1_target, motor_1_speed);
-        motor_2_speed = smooth_motor_speed(motor_2_target, motor_2_speed);
-        motor_3_speed = smooth_motor_speed(motor_3_target, motor_3_speed);
+    // printf("m1 m2 m3 m4 %li %li %li %li \n", motor_speed0, motor_speed1, motor_speed2, motor_speed3);
 
-        // printf("m1 m2 m3 m4 %li %li %li %li \n", motor_speed0, motor_speed1, motor_speed2, motor_speed3);
+    ledc_timer_config_t ledc_timer = {
+        .speed_mode = LEDC_LOW_SPEED_MODE,       // timer mode
+        .duty_resolution = DUTY_RESOLUTION,      // resolution of PWM duty
+        .timer_num = LEDC_HS_TIMER,              // timer index
+        .freq_hz = 5000,                         // frequency of PWM signal
+        .clk_cfg = LEDC_AUTO_CLK,                // Auto select the source clock
+    };
 
-        ledc_timer_config_t ledc_timer = {
-            .speed_mode = LEDC_LOW_SPEED_MODE,       // timer mode
-            .duty_resolution = DUTY_RESOLUTION,      // resolution of PWM duty
-            .timer_num = LEDC_HS_TIMER,              // timer index
-            .freq_hz = 5000,                         // frequency of PWM signal
-            .clk_cfg = LEDC_AUTO_CLK,                // Auto select the source clock
-        };
+    ledc_timer_config(&ledc_timer);
 
-        ledc_timer_config(&ledc_timer);
+    ledc_channel_config_t ledc_channel_0 = {
+        .channel    = LEDC_CHANNEL_0,
+        .duty       = LED_FULL_DUTY / 256 * (motor_0_speed) / SPEED_DIV,
+        .gpio_num   = GPIO_MOTOR_1,
+        .speed_mode = LEDC_LOW_SPEED_MODE,
+        .hpoint     = 0,
+        .timer_sel  = LEDC_HS_TIMER
+    };
+    ledc_channel_config_t ledc_channel_1 = {
+        .channel    = LEDC_CHANNEL_1,
+        .duty       = LED_FULL_DUTY / 256 * (motor_1_speed) / SPEED_DIV,
+        .gpio_num   = GPIO_MOTOR_2,
+        .speed_mode = LEDC_LOW_SPEED_MODE,
+        .hpoint     = 0,
+        .timer_sel  = LEDC_HS_TIMER
+    };
+    ledc_channel_config_t ledc_channel_2 = {
+        .channel    = LEDC_CHANNEL_2,
+        .duty       = LED_FULL_DUTY / 256 * (motor_2_speed) / SPEED_DIV,
+        .gpio_num   = GPIO_MOTOR_3,
+        .speed_mode = LEDC_LOW_SPEED_MODE,
+        .hpoint     = 0,
+        .timer_sel  = LEDC_HS_TIMER
+    };
+    ledc_channel_config_t ledc_channel_3 = {
+        .channel    = LEDC_CHANNEL_3,
+        .duty       = LED_FULL_DUTY / 256 * (motor_3_speed) / SPEED_DIV,
+        .gpio_num   = GPIO_MOTOR_4,
+        .speed_mode = LEDC_LOW_SPEED_MODE,
+        .hpoint     = 0,
+        .timer_sel  = LEDC_HS_TIMER
+    };
 
-        ledc_channel_config_t ledc_channel_0 = {
-            .channel    = LEDC_CHANNEL_0,
-            .duty       = LED_FULL_DUTY / 256 * (motor_0_speed) / SPEED_DIV,
-            .gpio_num   = GPIO_MOTOR_1,
-            .speed_mode = LEDC_LOW_SPEED_MODE,
-            .hpoint     = 0,
-            .timer_sel  = LEDC_HS_TIMER
-        };
-        ledc_channel_config_t ledc_channel_1 = {
-            .channel    = LEDC_CHANNEL_1,
-            .duty       = LED_FULL_DUTY / 256 * (motor_1_speed) / SPEED_DIV,
-            .gpio_num   = GPIO_MOTOR_2,
-            .speed_mode = LEDC_LOW_SPEED_MODE,
-            .hpoint     = 0,
-            .timer_sel  = LEDC_HS_TIMER
-        };
-        ledc_channel_config_t ledc_channel_2 = {
-            .channel    = LEDC_CHANNEL_2,
-            .duty       = LED_FULL_DUTY / 256 * (motor_2_speed) / SPEED_DIV,
-            .gpio_num   = GPIO_MOTOR_3,
-            .speed_mode = LEDC_LOW_SPEED_MODE,
-            .hpoint     = 0,
-            .timer_sel  = LEDC_HS_TIMER
-        };
-        ledc_channel_config_t ledc_channel_3 = {
-            .channel    = LEDC_CHANNEL_3,
-            .duty       = LED_FULL_DUTY / 256 * (motor_3_speed) / SPEED_DIV,
-            .gpio_num   = GPIO_MOTOR_4,
-            .speed_mode = LEDC_LOW_SPEED_MODE,
-            .hpoint     = 0,
-            .timer_sel  = LEDC_HS_TIMER
-        };
+    ledc_channel_config(&ledc_channel_0);
+    ledc_channel_config(&ledc_channel_1);
+    ledc_channel_config(&ledc_channel_2);
+    ledc_channel_config(&ledc_channel_3);
 
-        ledc_channel_config(&ledc_channel_0);
-        ledc_channel_config(&ledc_channel_1);
-        ledc_channel_config(&ledc_channel_2);
-        ledc_channel_config(&ledc_channel_3);
-
-        vTaskDelay(10 / portTICK_PERIOD_MS);
-    }
+    // vTaskDelay(3 / portTICK_PERIOD_MS); //portTICK_PERIOD_MS);
 }
 
 void gyro_accel_sample(struct bmi2_dev * bmi2_dev);
@@ -173,6 +175,7 @@ static esp_err_t i2c_master_init(void)
         .sda_pullup_en = GPIO_PULLUP_ENABLE,
         .scl_pullup_en = GPIO_PULLUP_ENABLE,
         .master.clk_speed = 400000,
+        // .master.clk_speed = 1000000,
     };
 
     i2c_param_config(i2c_master_port, &conf);
@@ -297,9 +300,10 @@ void app_main(void) {
         return;
     }
 
+    led_initialize();
     gpio_normalize();
     xTaskCreate(bmi270_task, "Gyro Task", 4096, (void *)i2c_num, 5, NULL);
-    xTaskCreate(control_task, "Control Task", 2048, NULL, 5, NULL);
+    // xTaskCreate(control_task, "Control Task", 2048, NULL, 5, NULL);
     wifi_init_softap();
     config_http();
 }
@@ -312,12 +316,10 @@ typedef struct {
     float integral;
 } pid_controller;
 
-pid_controller pid_x = {0.5, 0.0, 0.0, 0, 0};
-pid_controller pid_y = {0.5, 0.0, 0.0, 0, 0};
+pid_controller pid_x = {0.5, 0.00, 0.00, 0, 0};
+pid_controller pid_y = {0.5, 0.00, 0.00, 0, 0};
 
 static float x_estimate = 0, y_estimate = 0, z_estimate = 0;
-
-// static float x_target = 0, y_target = 0, z_target = 0;
 
 float alpha = 0.5;
 
@@ -358,13 +360,17 @@ void gyro_accel_sample(struct bmi2_dev * bmi2_dev) {
     uint8_t sensor_list[2] = { BMI2_ACCEL, BMI2_GYRO };
     rslt = bmi270_sensor_enable(sensor_list, 2, bmi2_dev);
 
+    float total = 0;
+    int count = 0;
+
     while (1) {
-        printf("waiting");
+        // printf("waiting");
         /* To get the data ready interrupt status of accel and gyro. */
         rslt = bmi2_get_int_status(&int_status, bmi2_dev);
 
         /* To check the data ready interrupt status and print the status for 10 samples. */
         if ((int_status & BMI2_ACC_DRDY_INT_MASK) && (int_status & BMI2_GYR_DRDY_INT_MASK)) {
+            // getting sensor data takes ~2ms.
             rslt = bmi2_get_sensor_data(&sensor_data, bmi2_dev);
 
             /* Converting lsb to meter per second squared for 16 bit accelerometer at 2G range. */
@@ -382,6 +388,8 @@ void gyro_accel_sample(struct bmi2_dev * bmi2_dev) {
             float dt = (current_time_us - prev_time_us) / 1000000.0f; // convert us to s
 
             prev_time_us = current_time_us;
+
+            // float math takes .15ms
 
             float pitch = atan2(ya, sqrt(xa * xa + za * za)) * rad2deg;
             float roll = atan2(-xa, za) * rad2deg;
@@ -404,9 +412,19 @@ void gyro_accel_sample(struct bmi2_dev * bmi2_dev) {
             applied_throttle = control_throttle;
             applied_yaw = control_yaw;
 
-            printf("xest %4.2f \t yest %4.2f; \t xtar %4.2f \t ytar %4.2f; xout %4.2f yout %4.2f; xapp %d, yapp %d; \n", x_estimate, y_estimate, x_target, y_target, x_output, y_output, applied_pitch, applied_roll);
+            // printf("xa %4.2f \t ya %4.2f \t za %4.2f \t xg %4.2f \t yg %4.2f \t zg %4.2f \n", xa, ya, za, xg, yg, zg);
+            // printf("xest %4.2f \t yest %4.2f; \t xtar %4.2f \t ytar %4.2f; xout %4.2f yout %4.2f; xapp %d, yapp %d; \n", x_estimate, y_estimate, x_target, y_target, x_output, y_output, applied_pitch, applied_roll);
 
-            // printf("%4.2f \t %4.2f \t %4.2f \t %4.2f \t %4.2f \t %4.2f \t %4.2f \n", xr, yr, zr, pitch, roll, xe, ye);
+            total += dt;
+            count += 1;
+
+            if (count % 100 == 0) {
+                printf("%f ms \n", total/count * 1000);
+            }
+
+            control_task(NULL);
+
+            // 2.9ms for full loop; 2.75ms for just gyroscope.
         }
     }
 }
