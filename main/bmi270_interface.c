@@ -43,6 +43,8 @@ esp_err_t bmi270_init_mine(i2c_port_t i2c_num, struct bmi2_dev *bmi270_sensor) {
     bmi270_sensor->write = i2c_write;
     bmi270_sensor->delay_us = delay_us;
     bmi270_sensor->intf_ptr = (void *)i2c_num;
+    bmi270_sensor->read_write_len = 16;
+    bmi270_sensor->aps_status = BMI2_DISABLE;
 
     int8_t result = bmi270_init(bmi270_sensor);
     if (result != BMI2_OK) {

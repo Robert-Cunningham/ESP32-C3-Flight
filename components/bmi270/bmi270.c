@@ -1467,6 +1467,8 @@ int8_t bmi270_sensor_enable(const uint8_t *sens_list, uint8_t n_sens, struct bmi
         rslt = BMI2_E_NULL_PTR;
     }
 
+    bmi2_set_adv_power_save(BMI2_DISABLE, dev);
+
     return rslt;
 }
 

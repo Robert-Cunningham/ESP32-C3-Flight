@@ -55,6 +55,16 @@ int applied_yaw = 0;
 #define DUTY_RESOLUTION    LEDC_TIMER_13_BIT // resolution of PWM duty
 #define LED_FULL_DUTY      (1<<DUTY_RESOLUTION) // maximum duty cycle
 
+typedef struct {
+    float p;
+    float i;
+    float d;
+    float last_error;
+    float integral;
+} pid_controller;
+
+pid_controller pid_x = {0.0010, 0.00, 0.00, 0, 0}; // set i = 10 for table test
+pid_controller pid_y = {0.0010, 0.00, 0.00, 0, 0};
 
 void led_initialize(void) {
     ledc_fade_func_install(0);
@@ -76,13 +86,13 @@ void gpio_normalize(void) {
 #define SPEED_UPDATE 4
 
 int32_t smooth_motor_speed(int32_t target, int32_t current) {
-    return target;
-
     if (target > 255) {
         target = 255;
     } else if (target < 0) {
         target = 0;
     }
+
+    return target;
 
     if (target > current) {
         return current + SPEED_UPDATE;
@@ -175,7 +185,7 @@ static esp_err_t i2c_master_init(void)
         .sda_pullup_en = GPIO_PULLUP_ENABLE,
         .scl_pullup_en = GPIO_PULLUP_ENABLE,
         .master.clk_speed = 400000,
-        // .master.clk_speed = 1000000,
+        // .master.clk_speed = 800000, // about 0.6ms of the 3ms is spent on transmission.
     };
 
     i2c_param_config(i2c_master_port, &conf);
@@ -263,6 +273,18 @@ esp_err_t command_post_handler(httpd_req_t *req) {
         if (httpd_query_key_value(buf, "yaw", param, sizeof(param)) == ESP_OK) {
             control_yaw = atoi(param);
         }
+        if (httpd_query_key_value(buf, "p", param, sizeof(param)) == ESP_OK) {
+            pid_x.p = atof(param);
+            pid_y.p = atof(param);
+        }
+        if (httpd_query_key_value(buf, "i", param, sizeof(param)) == ESP_OK) {
+            pid_x.i = atof(param);
+            pid_y.i = atof(param);
+        }
+        if (httpd_query_key_value(buf, "d", param, sizeof(param)) == ESP_OK) {
+            pid_x.d = atof(param);
+            pid_y.d = atof(param);
+        }
 
         httpd_resp_sendstr(req, "Command received");
         return ESP_OK;
@@ -308,18 +330,9 @@ void app_main(void) {
     config_http();
 }
 
-typedef struct {
-    float p;
-    float i;
-    float d;
-    float last_error;
-    float integral;
-} pid_controller;
-
-pid_controller pid_x = {0.5, 0.00, 0.00, 0, 0};
-pid_controller pid_y = {0.5, 0.00, 0.00, 0, 0};
-
 static float x_estimate = 0, y_estimate = 0, z_estimate = 0;
+
+static float x_gyro_integrate = 0, y_gyro_integrate = 0;
 
 float alpha = 0.5;
 
@@ -335,7 +348,7 @@ float pid_update(pid_controller* pid, float estimate, float target, float dt) {
     float derivative = (error - pid->last_error) / dt;
     pid->last_error = error;
 
-    float output = pid->p * error + pid->i * pid->integral + pid->d * derivative;
+    float output = pid->p * (error + pid->i * pid->integral + pid->d * derivative);
 
     return output;
 }
@@ -367,6 +380,7 @@ void gyro_accel_sample(struct bmi2_dev * bmi2_dev) {
         // printf("waiting");
         /* To get the data ready interrupt status of accel and gyro. */
         rslt = bmi2_get_int_status(&int_status, bmi2_dev);
+        // int_status = BMI2_ACC_DRDY_INT_MASK | BMI2_GYR_DRDY_INT_MASK;
 
         /* To check the data ready interrupt status and print the status for 10 samples. */
         if ((int_status & BMI2_ACC_DRDY_INT_MASK) && (int_status & BMI2_GYR_DRDY_INT_MASK)) {
@@ -400,6 +414,16 @@ void gyro_accel_sample(struct bmi2_dev * bmi2_dev) {
             x_estimate = alpha * (x_estimate + xg * dt) + (1 - alpha) * pitch;
             y_estimate = alpha * (y_estimate + yg * dt) + (1 - alpha) * roll;
 
+            /*
+            if (first) {
+                x_gyro_integrate = pitch;
+                y_gyro_integrate = roll;
+            } else {
+                x_gyro_integrate += xg * dt;
+                y_gyro_integrate += yg * dt;
+            }
+            */
+
             // PID controller
             float x_target = control_pitch * byte_to_deg;
             float y_target = control_roll * byte_to_deg;
@@ -414,11 +438,14 @@ void gyro_accel_sample(struct bmi2_dev * bmi2_dev) {
 
             // printf("xa %4.2f \t ya %4.2f \t za %4.2f \t xg %4.2f \t yg %4.2f \t zg %4.2f \n", xa, ya, za, xg, yg, zg);
             // printf("xest %4.2f \t yest %4.2f; \t xtar %4.2f \t ytar %4.2f; xout %4.2f yout %4.2f; xapp %d, yapp %d; \n", x_estimate, y_estimate, x_target, y_target, x_output, y_output, applied_pitch, applied_roll);
+            // printf("%4.2f, %4.2f, %4.2f, %4.2f, %4.2f, %4.2f, %d, %d\n", xg, yg, pitch, roll)
+            // printf("%4.2f \t %4.2f \t %4.2f \t %4.2f \n", x_gyro_integrate, y_gyro_integrate, pitch, roll);
 
             total += dt;
             count += 1;
 
             if (count % 100 == 0) {
+                // printf("%lu \t %lu \t %lu \t %lu \n", motor_0_speed, motor_1_speed, motor_2_speed, motor_3_speed);
                 printf("%f ms \n", total/count * 1000);
             }
 
